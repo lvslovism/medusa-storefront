@@ -59,29 +59,42 @@ async function getRegionMap(cacheId: string) {
 }
 
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next()
-  
   let cacheIdCookie = request.cookies.get("_medusa_cache_id")
-  let regionCookie = request.cookies.get("_medusa_region")
-  
   let cacheId = cacheIdCookie?.value || crypto.randomUUID()
 
-  // Set cache id if not exists
+  const regionMap = await getRegionMap(cacheId)
+  
+  const pathname = request.nextUrl.pathname
+  
+  // Check if URL already has a country code
+  const pathSegments = pathname.split("/")
+  const firstSegment = pathSegments[1]?.toLowerCase()
+  const urlHasCountryCode = firstSegment && regionMap.has(firstSegment)
+
+  // If URL has country code, let it pass
+  if (urlHasCountryCode) {
+    const response = NextResponse.next()
+    if (!cacheIdCookie) {
+      response.cookies.set("_medusa_cache_id", cacheId, {
+        maxAge: 60 * 60 * 24,
+      })
+    }
+    return response
+  }
+
+  // Check if static asset
+  if (pathname.includes(".")) {
+    return NextResponse.next()
+  }
+
+  // Rewrite to default region (URL stays the same, internally routes to /tw/...)
+  const newPath = `/${DEFAULT_REGION}${pathname === "/" ? "" : pathname}`
+  const response = NextResponse.rewrite(new URL(newPath, request.url))
+  
   if (!cacheIdCookie) {
     response.cookies.set("_medusa_cache_id", cacheId, {
       maxAge: 60 * 60 * 24,
     })
-  }
-
-  // Set default region cookie if not exists
-  if (!regionCookie) {
-    const regionMap = await getRegionMap(cacheId)
-    const region = regionMap.get(DEFAULT_REGION)
-    if (region) {
-      response.cookies.set("_medusa_region", DEFAULT_REGION, {
-        maxAge: 60 * 60 * 24 * 365,
-      })
-    }
   }
 
   return response
